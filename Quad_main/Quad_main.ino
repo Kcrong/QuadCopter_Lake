@@ -34,6 +34,14 @@ int16_t ax,ay,az;
 int16_t gx,gy,gz;
 int16_t mx,my,mz;
 
+
+float base_gx=0, base_gy=0, base_gz=0; //gyro bias
+float Accel_PITCH, Accel_ROLL;              //acceleration
+float Gyro_PITCH = 0, Gyro_ROLL = 0 ;             //gyro
+float Rate_PITCH, Rate_ROLL;                //angular velocity
+float Angle_PITCH = 0;
+float Angle_ROLL = 0;
+
 //Rx interrupt
 boolean InterruptLock = false;
 
@@ -74,9 +82,10 @@ void calibrate(){
 
 
 void setup() {
+  Wire.begin();
   Serial.begin(9600);
   mpu.initialize();
-
+  TWBR = 24;
   calibrate();
   InterruptAttach();
   InitESC();
@@ -87,16 +96,21 @@ void loop() {
 
    mpu.getMotion9(&ax,&ay,&az,&gx,&gy,&gz,&mx,&my,&mz);
 
-   Accel_x = atan(ay/sqrt(pow(ax,2) + pow(az,2)))*RADIANS_TO_DEGREES;
-   Accel_y = atan(-1*ax/sqrt(pow(ay,2) + pow(az,2)))*RADIANS_TO_DEGREES;
+   Accel_PITCH = atan(ay/sqrt(pow(ax,2) + pow(az,2)))*RADIANS_TO_DEGREES;
+   Accel_ROLL = atan(-1*ax/sqrt(pow(ay,2) + pow(az,2)))*RADIANS_TO_DEGREES;
 
-   Rate_x = (gx-base_gx)/fs;  //각속도
-   Rate_y = (gy-base_gy)/fs;
-   
+   Rate_PITCH = (gx-base_gx)/fs;  //각속도
+   Rate_ROLL = (gy-base_gy)/fs;
+
+   Gyro_PITCH = Angle_PITCH + (Rate_PITCH*SamplingTime);
+   Gyro_ROLL = Angle_ROLL + (Rate_ROLL*SamplingTime);
+
+   Angle_PITCH = (0.98*Gyro_PITCH) + (0.02*Accel_PITCH);
+   Angle_ROLL = (0.98*Gyro_PITCH) + (0.02*Accel_ROLL);
    
 
-   
-   Lock();
+  
+  AcquireLock();
 
   Ch3 = floor(Ch3/50)*50;
   Throttle = map(Ch3, 1130, 1800, ESC_min, ESC_MAX); 
@@ -106,7 +120,9 @@ void loop() {
   LastThrottle = Throttle;
     
   ReleaseLock();
-  Serial.println(Throttle);
+  
+  
+  Serial.println(Angle_PITCH);
   M1.writeMicroseconds(Throttle);
 
 }
@@ -131,11 +147,11 @@ void Ch4_Interrupt() {
 
 }
 
-void Lock(){
+void AcquireLock(){
   InterruptLock = true;
 }
 
-void ReleaseLock(){
+void ReleaseLock(){ 
   InterruptLock = false;
 }
 
