@@ -16,13 +16,18 @@ MPU6050 mpu;
 #define RC_Ch3 8 
 #define RC_Ch4 12  
 
+#define ROLL_MIN -30
+#define ROLL_MAX 30
+#define PITCH_MIN -30
+#define PITCH_MAX 30
+
 //ESC pin
 #define ESC5 5
 #define ESC6 6
 #define ESC9 9
 #define ESC10 10
 
-#define ESC_min 800
+#define ESC_MIN 800
 #define ESC_MAX 2200
 
 #define SamplingTime 0.01
@@ -35,11 +40,11 @@ int16_t gx,gy,gz;
 int16_t mx,my,mz;
 
 
-float base_gx=0, base_gy=0, base_gz=0; //gyro bias
-float Accel_PITCH, Accel_ROLL;              //acceleration
+float base_gx=0, base_gy=0, base_gz=0;            //gyro bias
+float Accel_PITCH, Accel_ROLL;                         //acceleration
 float Gyro_PITCH = 0, Gyro_ROLL = 0 ;             //gyro
-float Rate_PITCH, Rate_ROLL;                //angular velocity
-float Angle_PITCH = 0;
+float Rate_PITCH, Rate_ROLL;                           //angular velocity
+float Angle_PITCH = 0;                                        //final angle
 float Angle_ROLL = 0;
 
 //Rx interrupt
@@ -59,9 +64,10 @@ volatile float Ch3;
 volatile float Ch4;
 
 
-// ch3 Throttle
-int Throttle,  LastThrottle;
 
+uint16_t Throttle,  LastThrottle;
+int8_t TargetROLL, TargetPITCH;
+int8_t LastROLL, LastPITCH;
 
 void calibrate(){  
    
@@ -79,50 +85,86 @@ void calibrate(){
   base_gy /=loop;
   base_gz /=loop;
 }
-
+int count=0;
 
 void setup() {
   Wire.begin();
   Serial.begin(9600);
   mpu.initialize();
   TWBR = 24;
-  calibrate();
+  //calibrate();
   InterruptAttach();
   InitESC();
 
 }
 
 void loop() {
-
+/*count +=1;
+if(count ==100)
+  Serial.println(millis());*/
+///////////////////////////////////////////////////get angle///////////////////////////////////////////////////
    mpu.getMotion9(&ax,&ay,&az,&gx,&gy,&gz,&mx,&my,&mz);
 
    Accel_PITCH = atan(ay/sqrt(pow(ax,2) + pow(az,2)))*RADIANS_TO_DEGREES;
    Accel_ROLL = atan(-1*ax/sqrt(pow(ay,2) + pow(az,2)))*RADIANS_TO_DEGREES;
 
-   Rate_PITCH = (gx-base_gx)/fs;  //각속도
+  //angular velocity
+   Rate_PITCH = (gx-base_gx)/fs;  
    Rate_ROLL = (gy-base_gy)/fs;
 
    Gyro_PITCH = Angle_PITCH + (Rate_PITCH*SamplingTime);
    Gyro_ROLL = Angle_ROLL + (Rate_ROLL*SamplingTime);
 
+
+  //complementary filter
    Angle_PITCH = (0.98*Gyro_PITCH) + (0.02*Accel_PITCH);
    Angle_ROLL = (0.98*Gyro_PITCH) + (0.02*Accel_ROLL);
-   
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  
+
+///////////////////////////////////////////////////Interrupt///////////////////////////////////////////////////
+  //get Targetangle, Throttle
   AcquireLock();
-
+  
   Ch3 = floor(Ch3/50)*50;
-  Throttle = map(Ch3, 1130, 1800, ESC_min, ESC_MAX); 
-  if(Throttle < ESC_min || Throttle > ESC_MAX){
-    Throttle = LastThrottle;
-  }
-  LastThrottle = Throttle;
+  
+  TargetROLL = map(Ch1, 1100, 1900, ROLL_MIN, ROLL_MAX);
+  TargetPITCH = map(Ch2, 1100, 1900, PITCH_MIN, PITCH_MAX);
+  Throttle = map(Ch3, 1130, 1800, ESC_MIN, ESC_MAX); 
+
+  if(TargetROLL < ROLL_MIN || TargetROLL > ROLL_MAX)
+    TargetROLL = LastROLL;
     
+  if(TargetPITCH < PITCH_MIN || TargetPITCH > PITCH_MAX)
+    TargetPITCH = LastPITCH;
+  
+  if(Throttle < ESC_MIN || Throttle > ESC_MAX)
+    Throttle = LastThrottle;
+
+  if(TargetROLL >= -3 && TargetROLL <= 3)
+    TargetROLL = 0;
+
+  if(TargetPITCH >= -3 && TargetPITCH <= 3 )
+    TargetPITCH = 0;
+  
+  
+  LastThrottle = Throttle;
+  LastROLL = TargetROLL;
+  LastPITCH = TargetPITCH;
+  
   ReleaseLock();
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  //Double-loop Proportional, Integral, Differential Control (PID)
   
+  //Serial.print(TargetROLL);
+  //Serial.print("      ");
+  //Serial.println(TargetPITCH);
+ // Serial.print("  ");
+ 
+
+ 
   
-  Serial.println(Angle_PITCH);
   M1.writeMicroseconds(Throttle);
 
 }
@@ -130,11 +172,15 @@ void loop() {
 
 
 void Ch1_Interrupt() {
- 
+  if(InterruptLock==false) 
+    Ch1 = micros() -LastCh1;
+  LastCh1 = micros();
 }
 
 void Ch2_Interrupt() {
-
+  if(InterruptLock==false) 
+    Ch2 = micros() -LastCh2;
+  LastCh2 = micros();
 }
 
 void Ch3_Interrupt() {
@@ -144,7 +190,9 @@ void Ch3_Interrupt() {
 }
 
 void Ch4_Interrupt() {
-
+  if(InterruptLock==false) 
+    Ch4 = micros() -LastCh4;
+  LastCh4 = micros();
 }
 
 void AcquireLock(){
