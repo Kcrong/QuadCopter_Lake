@@ -36,26 +36,29 @@ MPU6050 mpu;
 
 Servo M1,M2,M3,M4;
 
-bool dmpReady = false;  // set true if DMP init was successful
-uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
 
-uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
-uint16_t fifoCount;     // count of all bytes currently in FIFO
-uint8_t fifoBuffer[64]; // FIFO storage buffer
+uint8_t mpuIntStatus;  
 
-Quaternion q;           // [w, x, y, z]         quaternion container
-VectorInt16 aa;         // [x, y, z]            accel sensor measurements
-VectorInt16 aaReal;     // [x, y, z]            gravity-free accel sensor measurements
-VectorInt16 aaWorld;    // [x, y, z]            world-frame accel sensor measurements
-VectorFloat gravity;    // [x, y, z]            gravity vector
-float euler[3];         // [psi, theta, phi]    Euler angle container
-float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
+uint16_t packetSize;  
+uint16_t fifoCount;    
+uint8_t fifoBuffer[64];
+
+Quaternion q;           
+VectorInt16 aa;         
+VectorInt16 aaReal;    
+VectorInt16 aaWorld;    
+VectorFloat gravity;    
+float euler[3];        
+float yrp[3];     
+int16_t gyro[3];
+float ROLL_ANGLE;
+float PITCH_ANGLE; 
+
 uint8_t teapotPacket[14] = { '$', 0x02, 0,0, 0,0, 0,0, 0,0, 0x00, 0x00, '\r', '\n' };
 
 
 
-volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
-
+volatile bool mpuInterrupt = false;   
 
 
 //Rx interrupt
@@ -78,19 +81,19 @@ volatile float Ch4;
 
 uint16_t Throttle,  LastThrottle;
 int8_t TargetROLL, TargetPITCH;
-int8_t LastROLL, LastPITCH;
+int8_t LastTargetROLL, LastTargetPITCH;
 
 
 void dmpDataReady() {
     mpuInterrupt = true;
 }
 
-int count=0;
+//int count=0;
 
 void setup() {
    #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
         Wire.begin();
-        TWBR = 24; // 400kHz I2C clock (200kHz if CPU is 8MHz). Comment this line if having compilation difficulties with TWBR.
+        TWBR = 24;
     #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
         Fastwire::setup(400, true);
     #endif
@@ -101,13 +104,13 @@ void setup() {
   mpu.setXGyroOffset(220);
   mpu.setYGyroOffset(76);
   mpu.setZGyroOffset(-85);
-  mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
+  mpu.setZAccelOffset(1788); 
 
 
   mpu.setDMPEnabled(true);
   attachInterrupt(0, dmpDataReady, RISING);
   mpuIntStatus = mpu.getIntStatus();
-  dmpReady = true;
+  
     
   packetSize = mpu.dmpGetFIFOPacketSize();
 
@@ -136,17 +139,17 @@ if(count ==100)
         mpu.getFIFOBytes(fifoBuffer, packetSize);
         fifoCount -= packetSize;
 
-        //mpu.dmpGetGyro(gyro, fifoBuffer);
+        mpu.dmpGetGyro(gyro, fifoBuffer);
         mpu.dmpGetQuaternion(&q, fifoBuffer);
         mpu.dmpGetGravity(&gravity, &q);
-        mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+        mpu.dmpGetYawPitchRoll(yrp, &q, &gravity);
         // ypr[0] : YAW
-        // ypr[1] : PITCH
-        // ypr[2] : ROLL
-        float ROLL = ypr[1] * 180/M_PI-0.3;
-        float PITCH = ypr[2] * 180/M_PI-1.1; 
+        // yrp[1]  gyro[1] : ROLL 
+        // yrp[2]  gyro[2] : PITCH
+       ROLL_ANGLE = yrp[1] * 180/M_PI-0.3;
+       PITCH_ANGLE = yrp[2] * 180/M_PI-1.1; 
 
-       AcquireLock();
+        AcquireLock();
   
         Ch3 = floor(Ch3/50)*50;
   
@@ -155,10 +158,10 @@ if(count ==100)
         Throttle = map(Ch3, 1130, 1800, ESC_MIN, ESC_MAX); 
 
         if(TargetROLL < ROLL_MIN || TargetROLL > ROLL_MAX)
-          TargetROLL = LastROLL;
+          TargetROLL = LastTargetROLL;
     
         if(TargetPITCH < PITCH_MIN || TargetPITCH > PITCH_MAX)
-          TargetPITCH = LastPITCH;
+          TargetPITCH = LastTargetPITCH;
   
         if(Throttle < ESC_MIN || Throttle > ESC_MAX)
           Throttle = LastThrottle;
@@ -171,17 +174,18 @@ if(count ==100)
   
   
         LastThrottle = Throttle;
-        LastROLL = TargetROLL;
-        LastPITCH = TargetPITCH;
+        LastTargetROLL = TargetROLL;
+        LastTargetPITCH = TargetPITCH;
   
         ReleaseLock();
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   //Double-loop Proportional, Integral, Differential Control (PID)
 
-  Serial.print(ROLL);
+  
+  Serial.print(gyro[1]);
   Serial.print("   ");
-  Serial.print(PITCH);
+  Serial.print(gyro[2]);
   Serial.print("   ");
   Serial.print(TargetROLL);
   Serial.print("   ");
