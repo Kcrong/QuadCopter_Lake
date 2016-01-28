@@ -1,14 +1,16 @@
 #include <PinChangeInt.h>
 #include <Servo.h>
-#include "Wire.h"
-#include "MPU6050.h"
 #include "I2Cdev.h"
+#include "MPU6050_6Axis_MotionApps20.h"
+#if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+    #include "Wire.h"
+#endif
 
 
-#define pi 3.141592
-#define RADIANS_TO_DEGREES 180/3.14159
-#define fs 131.0; 
+
 MPU6050 mpu;
+#define OUTPUT_READABLE_YAWPITCHROLL
+
 
 //Rx channel pin
 #define RC_Ch1 4
@@ -34,18 +36,27 @@ MPU6050 mpu;
 
 Servo M1,M2,M3,M4;
 
+bool dmpReady = false;  // set true if DMP init was successful
+uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
 
-int16_t ax,ay,az;
-int16_t gx,gy,gz;
-int16_t mx,my,mz;
+uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount;     // count of all bytes currently in FIFO
+uint8_t fifoBuffer[64]; // FIFO storage buffer
+
+Quaternion q;           // [w, x, y, z]         quaternion container
+VectorInt16 aa;         // [x, y, z]            accel sensor measurements
+VectorInt16 aaReal;     // [x, y, z]            gravity-free accel sensor measurements
+VectorInt16 aaWorld;    // [x, y, z]            world-frame accel sensor measurements
+VectorFloat gravity;    // [x, y, z]            gravity vector
+float euler[3];         // [psi, theta, phi]    Euler angle container
+float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
+uint8_t teapotPacket[14] = { '$', 0x02, 0,0, 0,0, 0,0, 0,0, 0x00, 0x00, '\r', '\n' };
 
 
-float base_gx=0, base_gy=0, base_gz=0;            //gyro bias
-float Accel_PITCH, Accel_ROLL;                         //acceleration
-float Gyro_PITCH = 0, Gyro_ROLL = 0 ;             //gyro
-float Rate_PITCH, Rate_ROLL;                           //angular velocity
-float Angle_PITCH = 0;                                        //final angle
-float Angle_ROLL = 0;
+
+volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
+
+
 
 //Rx interrupt
 boolean InterruptLock = false;
@@ -69,30 +80,38 @@ uint16_t Throttle,  LastThrottle;
 int8_t TargetROLL, TargetPITCH;
 int8_t LastROLL, LastPITCH;
 
-void calibrate(){  
-   
-  int loop =10;
-  for (int i=0;i<loop;i++)
-  {
-    mpu.getMotion9(&ax,&ay,&az,&gx,&gy,&gz,&mx,&my,&mz);
-    base_gx += gx;
-    base_gy += gy;  
-    base_gz += gz;
-    delay(80);
-  }
-  
-  base_gx /=loop;
-  base_gy /=loop;
-  base_gz /=loop;
+
+void dmpDataReady() {
+    mpuInterrupt = true;
 }
+
 int count=0;
 
 void setup() {
-  Wire.begin();
-  Serial.begin(9600);
+   #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+        Wire.begin();
+        TWBR = 24; // 400kHz I2C clock (200kHz if CPU is 8MHz). Comment this line if having compilation difficulties with TWBR.
+    #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
+        Fastwire::setup(400, true);
+    #endif
+  Serial.begin(115200);
   mpu.initialize();
-  TWBR = 24;
-  //calibrate();
+  mpu.dmpInitialize();
+  
+  mpu.setXGyroOffset(220);
+  mpu.setYGyroOffset(76);
+  mpu.setZGyroOffset(-85);
+  mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
+
+
+  mpu.setDMPEnabled(true);
+  attachInterrupt(0, dmpDataReady, RISING);
+  mpuIntStatus = mpu.getIntStatus();
+  dmpReady = true;
+    
+  packetSize = mpu.dmpGetFIFOPacketSize();
+
+  
   InterruptAttach();
   InitESC();
 
@@ -102,71 +121,80 @@ void loop() {
 /*count +=1;
 if(count ==100)
   Serial.println(millis());*/
-///////////////////////////////////////////////////get angle///////////////////////////////////////////////////
-   mpu.getMotion9(&ax,&ay,&az,&gx,&gy,&gz,&mx,&my,&mz);
+    while (!mpuInterrupt && fifoCount < packetSize) {
+     }
 
-   Accel_PITCH = atan(ay/sqrt(pow(ax,2) + pow(az,2)))*RADIANS_TO_DEGREES;
-   Accel_ROLL = atan(-1*ax/sqrt(pow(ay,2) + pow(az,2)))*RADIANS_TO_DEGREES;
+    mpuInterrupt = false;
+    mpuIntStatus = mpu.getIntStatus();
 
-  //angular velocity
-   Rate_PITCH = (gx-base_gx)/fs;  
-   Rate_ROLL = (gy-base_gy)/fs;
+    fifoCount = mpu.getFIFOCount();
+     if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
+        mpu.resetFIFO();
+        
+    } else if (mpuIntStatus & 0x02) {
+        while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+        mpu.getFIFOBytes(fifoBuffer, packetSize);
+        fifoCount -= packetSize;
 
-   Gyro_PITCH = Angle_PITCH + (Rate_PITCH*SamplingTime);
-   Gyro_ROLL = Angle_ROLL + (Rate_ROLL*SamplingTime);
+        //mpu.dmpGetGyro(gyro, fifoBuffer);
+        mpu.dmpGetQuaternion(&q, fifoBuffer);
+        mpu.dmpGetGravity(&gravity, &q);
+        mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+        // ypr[0] : YAW
+        // ypr[1] : PITCH
+        // ypr[2] : ROLL
+        float ROLL = ypr[1] * 180/M_PI-0.3;
+        float PITCH = ypr[2] * 180/M_PI-1.1; 
 
-
-  //complementary filter
-   Angle_PITCH = (0.98*Gyro_PITCH) + (0.02*Accel_PITCH);
-   Angle_ROLL = (0.98*Gyro_PITCH) + (0.02*Accel_ROLL);
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-///////////////////////////////////////////////////Interrupt///////////////////////////////////////////////////
-  //get Targetangle, Throttle
-  AcquireLock();
+       AcquireLock();
   
-  Ch3 = floor(Ch3/50)*50;
+        Ch3 = floor(Ch3/50)*50;
   
-  TargetROLL = map(Ch1, 1100, 1900, ROLL_MIN, ROLL_MAX);
-  TargetPITCH = map(Ch2, 1100, 1900, PITCH_MIN, PITCH_MAX);
-  Throttle = map(Ch3, 1130, 1800, ESC_MIN, ESC_MAX); 
+        TargetROLL = map(Ch1, 1100, 1900, ROLL_MIN, ROLL_MAX);
+        TargetPITCH = map(Ch2, 1100, 1900, PITCH_MIN, PITCH_MAX);
+        Throttle = map(Ch3, 1130, 1800, ESC_MIN, ESC_MAX); 
 
-  if(TargetROLL < ROLL_MIN || TargetROLL > ROLL_MAX)
-    TargetROLL = LastROLL;
+        if(TargetROLL < ROLL_MIN || TargetROLL > ROLL_MAX)
+          TargetROLL = LastROLL;
     
-  if(TargetPITCH < PITCH_MIN || TargetPITCH > PITCH_MAX)
-    TargetPITCH = LastPITCH;
+        if(TargetPITCH < PITCH_MIN || TargetPITCH > PITCH_MAX)
+          TargetPITCH = LastPITCH;
   
-  if(Throttle < ESC_MIN || Throttle > ESC_MAX)
-    Throttle = LastThrottle;
+        if(Throttle < ESC_MIN || Throttle > ESC_MAX)
+          Throttle = LastThrottle;
 
-  if(TargetROLL >= -3 && TargetROLL <= 3)
-    TargetROLL = 0;
+        if(TargetROLL >= -3 && TargetROLL <= 3)
+          TargetROLL = 0;
 
-  if(TargetPITCH >= -3 && TargetPITCH <= 3 )
-    TargetPITCH = 0;
+        if(TargetPITCH >= -3 && TargetPITCH <= 3 )
+          TargetPITCH = 0;
   
   
-  LastThrottle = Throttle;
-  LastROLL = TargetROLL;
-  LastPITCH = TargetPITCH;
+        LastThrottle = Throttle;
+        LastROLL = TargetROLL;
+        LastPITCH = TargetPITCH;
   
-  ReleaseLock();
+        ReleaseLock();
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   //Double-loop Proportional, Integral, Differential Control (PID)
-  
-  //Serial.print(TargetROLL);
-  //Serial.print("      ");
-  //Serial.println(TargetPITCH);
- // Serial.print("  ");
- 
+
+  Serial.print(ROLL);
+  Serial.print("   ");
+  Serial.print(PITCH);
+  Serial.print("   ");
+  Serial.print(TargetROLL);
+  Serial.print("   ");
+  Serial.print(TargetPITCH);
+  Serial.print("   ");
+  Serial.println(Throttle);
 
  
   
   M1.writeMicroseconds(Throttle);
 
+      
+    }
 }
 
 
