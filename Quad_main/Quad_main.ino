@@ -28,7 +28,7 @@ MPU6050 mpu;
 #define ESC10 10
 
 #define ESC_MIN 800
-#define ESC_MAX 2500 //2200
+#define ESC_MAX 2200 
 
 #define SamplingTime 0.01
 
