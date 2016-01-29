@@ -2,6 +2,7 @@
 #include <Servo.h>
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
+
 #include "Wire.h"
 
 
@@ -27,7 +28,7 @@ MPU6050 mpu;
 #define ESC10 10
 
 #define ESC_MIN 800
-#define ESC_MAX 2200
+#define ESC_MAX 2500 //2200
 
 #define SamplingTime 0.01
 
@@ -103,7 +104,7 @@ void dmpDataReady() {
   mpuInterrupt = true;
 }
 
-int dmpReady = 0;
+unsigned long dmpReady = 0;
 
 void setup() {
 
@@ -130,6 +131,8 @@ void setup() {
 
   InterruptAttach();
   InitESC();
+
+  pinMode(13,OUTPUT);
 
 }
 
@@ -194,18 +197,25 @@ void loop() {
     ReleaseLock();
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     
-    if(dmpReady > 1700)
+    if(dmpReady > 1700){
       PIDcontrol();
+      digitalWrite(13,HIGH);
+    }
+    else
+      digitalWrite(13,LOW);
 
 
 
     
-    
-    //M1.writeMicroseconds(Throttle);
+   // if(Throttle > 1400)
+     // Throttle = 1400;
+
+     // Serial.println(Throttle);
+    M1.writeMicroseconds(Throttle);
     M2.writeMicroseconds(Throttle);
-    //M3.writeMicroseconds(Throttle);
-    //M4.writeMicroseconds(Throttle);
-
+    M3.writeMicroseconds(Throttle);
+    M4.writeMicroseconds(Throttle);
+  //Serial.println(Throttle);
 
   dmpReady++;
   }
@@ -243,13 +253,10 @@ void PIDcontrol(){
     PITCH_PIDout = PITCH_P + PITCH_I + PITCH_D;
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    /*Serial.print(ROLL_Angle);
+    /*Serial.print(ROLL_PIDout);
     Serial.print("   ");
-    Serial.print(PITCH_Angle);
-    Serial.print("   ");
-    Serial.print(ROLL_I);
-    Serial.print("   ");
-    Serial.println(PITCH_I);*/
+    Serial.println(PITCH_PIDout);*/
+    
 }
 
 
@@ -287,7 +294,7 @@ void ReleaseLock() {
 }
 
 void InitESC() {
-  //M1.attach(ESC5);
+  M1.attach(ESC5);
   M2.attach(ESC6);
   M3.attach(ESC9);
   M4.attach(ESC10);
