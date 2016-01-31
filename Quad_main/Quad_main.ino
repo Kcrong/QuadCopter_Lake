@@ -30,14 +30,15 @@ MPU6050 mpu;
 #define ESC_MIN 800
 #define ESC_MAX 2200 
 
+
 #define SamplingTime 0.01
 
 
 //Gain value
-#define OuterPgain 6.5
-#define Pgain 5
-#define Igain 0.7
-#define Dgain 0.135
+#define OuterPgain 4.7
+#define Pgain 1
+#define Igain 0.4
+#define Dgain 0.335
 
 Servo M1, M2, M3, M4;
 
@@ -49,11 +50,7 @@ uint16_t fifoCount;
 uint8_t fifoBuffer[64];
 
 Quaternion q;
-//VectorInt16 aa;
-//VectorInt16 aaReal;
-//VectorInt16 aaWorld;
 VectorFloat gravity;
-//float euler[3];
 float yrp[3];
 int16_t gyro[3];
 float ROLL_Angle, ROLL_Rate;
@@ -67,7 +64,10 @@ float PITCH_P, PITCH_D, PITCH_I = 0;
 float ROLL_LastRateError ;
 float PITCH_LastRateError ;
 
-float ROLL_PIDout, PITCH_PIDout;
+float ROLL_PID = 0;
+float PITCH_PID = 0;
+
+float M1Out, M2Out, M3Out , M4Out;
 
 uint8_t teapotPacket[14] = { '$', 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, '\r', '\n' };
 
@@ -196,28 +196,31 @@ void loop() {
 
     ReleaseLock();
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    
+    if(Serial.available())
+      dmpReady = 2000;
+      
     if(dmpReady > 1700){
       PIDcontrol();
       digitalWrite(13,HIGH);
     }
-    else
+    else{
       digitalWrite(13,LOW);
+      Serial.print(ROLL_Angle);
+      Serial.print("   ");
+      Serial.println(PITCH_Angle);
+
+    }
 
 
 
     
-   // if(Throttle > 1400)
-     // Throttle = 1400;
+    if(Throttle > 1300)
+      Throttle = 1300;
 
-     // Serial.println(Throttle);
-    M1.writeMicroseconds(Throttle);
-    M2.writeMicroseconds(Throttle);
-    M3.writeMicroseconds(Throttle);
-    M4.writeMicroseconds(Throttle);
-  //Serial.println(Throttle);
+    
 
-  dmpReady++;
+
+  //dmpReady++;
   }
 
 }
@@ -235,7 +238,7 @@ void PIDcontrol(){
 
     ROLL_LastRateError = ROLL_RateError;
 
-    ROLL_PIDout = ROLL_P + ROLL_I + ROLL_D;
+    ROLL_PID = ROLL_P + PITCH_I + ROLL_D;
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -250,12 +253,27 @@ void PIDcontrol(){
 
     PITCH_LastRateError = PITCH_RateError;
 
-    PITCH_PIDout = PITCH_P + PITCH_I + PITCH_D;
+    PITCH_PID = PITCH_P + PITCH_I + PITCH_D;
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    /*Serial.print(ROLL_PIDout);
-    Serial.print("   ");
-    Serial.println(PITCH_PIDout);*/
+    M1Out = (ROLL_PID - PITCH_PID)*0.5 + (float)Throttle;
+    M2Out = (-ROLL_PID - PITCH_PID)*0.5 + (float)Throttle;
+    M3Out = (-ROLL_PID + PITCH_PID)*0.5 + (float)Throttle;
+    M4Out = (ROLL_PID + PITCH_PID)*0.5 + (float)Throttle;
+
+    if(Throttle<900){
+      M1Out = ESC_MIN;
+      M2Out = ESC_MIN;
+      M3Out = ESC_MIN;
+      M4Out = ESC_MIN;
+    }
+
+
+    ///////////////////////////////ESC OUTPUT//////////////////////////////////////////
+   // M1.writeMicroseconds(M1Out);
+    M2.writeMicroseconds(M2Out);
+   // M3.writeMicroseconds(M3Out);
+    M4.writeMicroseconds(M4Out);
     
 }
 
@@ -300,13 +318,13 @@ void InitESC() {
   M4.attach(ESC10);
 
   //set ESC
-  /*M1.writeMicroseconds(ESC_min);
-    M2.writeMicroseconds(ESC_min);
-    M3.writeMicroseconds(ESC_min);
-    M4.writeMicroseconds(ESC_min);
+    M1.writeMicroseconds(ESC_MIN);
+    M2.writeMicroseconds(ESC_MIN);
+    M3.writeMicroseconds(ESC_MIN);
+    M4.writeMicroseconds(ESC_MIN);
 
-    //delay(5000);
-  */
+    delay(5000);
+  
 }
 
 
