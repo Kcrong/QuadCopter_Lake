@@ -32,10 +32,10 @@ MPU6050 mpu;
 
 
 //Gain value
-#define OuterPgain 4.1
-#define Pgain 1.0
-#define Igain 0 //0.4
-#define Dgain 0.335
+#define OuterPgain 4.0
+#define Pgain 0.3
+#define Igain 0.28
+#define Dgain 0.18
 
 Servo M1, M2, M3, M4;
 
@@ -91,7 +91,7 @@ void setup() {
   Wire.begin();
   TWBR = 24;
 
-  Serial.begin(115200);
+  //Serial.begin(115200);
   mpu.initialize();
   mpu.dmpInitialize();
 
@@ -124,6 +124,7 @@ void loop() {
   fifoCount = mpu.getFIFOCount();
   if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
     mpu.resetFIFO();
+    
 
   } else if (mpuIntStatus & 0x02) {
     while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
@@ -145,8 +146,8 @@ void loop() {
 
     RC_Command();
 
-    //if(Throttle>1400)
-      //Throttle = 1400;
+    if(Throttle>1900)
+      Throttle = 1900;
 
     
     if(dmpReady > 1700){
@@ -169,21 +170,19 @@ void loop() {
       M2Out = ESC_MIN;
       M3Out = ESC_MIN;
       M4Out = ESC_MIN;
+      ROLL_I = PITCH_I = 0;
+      
     }
 
-     
-    Serial.print(Throttle);
-    Serial.print("   ");
-    Serial.print(TargetROLL);
-    Serial.print("   ");
-    Serial.println(TargetPITCH);
+   
+    //Serial.println(PITCH_PID);
    
 
     ///////////////////////////////Motor OUTPUT//////////////////////////////////////////
 
-    //M1.writeMicroseconds(M1Out);
+      M1.writeMicroseconds(M1Out);
       M2.writeMicroseconds(M2Out);
-    //M3.writeMicroseconds(M3Out);
+      M3.writeMicroseconds(M3Out);
       M4.writeMicroseconds(M4Out);
   
   dmpReady++;
@@ -195,17 +194,17 @@ void PIDcontrol(){
   //Double-loop Proportional, Integral, Differential Control (PID)
     //ROLL CONTROL////////////////////////////////////////////////
     ROLL_AngleError = TargetROLL - ROLL_Angle;
-    ROLL_RateError = (ROLL_AngleError * OuterPgain) - ROLL_Rate;
+    ROLL_RateError = (ROLL_AngleError * OuterPgain) + ROLL_Rate;
 
     ROLL_P = ROLL_RateError * Pgain;
     ROLL_I += (ROLL_RateError * SamplingTime) * Igain;
-    LIMIT(&ROLL_I , -100, 100);
+    LIMIT(&ROLL_I , -200, 200);
     ROLL_D = ((ROLL_RateError - ROLL_LastRateError) / SamplingTime) * Dgain;
 
     ROLL_LastRateError = ROLL_RateError;
 
     ROLL_PID = ROLL_P + PITCH_I + ROLL_D;
-   
+    
     //////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -215,7 +214,7 @@ void PIDcontrol(){
 
     PITCH_P = PITCH_RateError * Pgain;
     PITCH_I += (PITCH_RateError * SamplingTime) * Igain;
-    LIMIT(&PITCH_I , -100, 100);
+    LIMIT(&PITCH_I , -200, 200);
     PITCH_D = ((PITCH_RateError - PITCH_LastRateError) / SamplingTime) * Dgain; 
     
     PITCH_LastRateError = PITCH_RateError;
@@ -242,7 +241,7 @@ void InitESC() {
     M3.writeMicroseconds(ESC_MIN);
     M4.writeMicroseconds(ESC_MIN);
 
-    delay(5000);
+    delay(3000);
   
 }
 
