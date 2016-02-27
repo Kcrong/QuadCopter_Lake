@@ -235,7 +235,7 @@ void PIDcontrol(){
     YAW_RateError = TargetYAW - YAW_Rate;
     YAW_P = YAW_RateError * YAW_Pgain;
     YAW_I += (YAW_RateError * SamplingTime) * YAW_Igain ;
-    LIMIT( &YAW_I, -300, 300);
+    LIMIT( &YAW_I, -200, 200);
 
     YAW_PI = YAW_P + YAW_I;
     
