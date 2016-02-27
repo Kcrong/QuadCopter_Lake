@@ -10,13 +10,15 @@
 #define ROLL_MAX 30
 #define PITCH_MIN -30
 #define PITCH_MAX 30
+#define YAW_MIN -20
+#define YAW_MAX 20
 
 #define ESC_MIN 800
 #define ESC_MAX 2200 
 
 
 //Rx interrupt
-boolean InterruptLock = false;
+//boolean InterruptLock = false;
 
 //calculate Rx pulse
 volatile unsigned long LastCh1 = micros();
@@ -31,18 +33,14 @@ volatile float Ch2;
 volatile float Ch3;
 volatile float Ch4;
 
-uint16_t Throttle,  LastThrottle=0;
-int8_t TargetROLL, TargetPITCH;
-int8_t LastTargetROLL, LastTargetPITCH;
-
-
-
+uint16_t Throttle=0;
+int8_t TargetROLL, TargetPITCH, Yaw;
 
 void setup() {
   Wire.begin(4);
   Wire.onRequest(Send);
  
-  Serial.begin(9600);
+  //Serial.begin(9600);
 
   PCintPort::attachInterrupt(RC_Ch1, Ch1_Interrupt, CHANGE);
   PCintPort::attachInterrupt(RC_Ch2, Ch2_Interrupt, CHANGE);
@@ -56,28 +54,8 @@ void loop() {
     TargetROLL = map(Ch1, 1100, 1900, ROLL_MIN, ROLL_MAX);
     TargetPITCH = map(Ch2, 1100, 1900, PITCH_MIN, PITCH_MAX);
     Throttle = map(Ch3, 1130, 1800, ESC_MIN, ESC_MAX);
-    
-    if (Throttle < ESC_MIN || Throttle > ESC_MAX)
-      Throttle = LastThrottle;
-    
-    if (TargetROLL < ROLL_MIN || TargetROLL > ROLL_MAX)
-      TargetROLL = LastTargetROLL;
-
-    if (TargetPITCH < PITCH_MIN || TargetPITCH > PITCH_MAX)
-      TargetPITCH = LastTargetPITCH;
-      
-    if (TargetROLL >= -3 && TargetROLL <= 3)
-      TargetROLL = 0;
-
-    if (TargetPITCH >= -3 && TargetPITCH <= 3 )
-      TargetPITCH = 0;
-
-    LastThrottle = Throttle;
-    LastTargetROLL = TargetROLL;
-    LastTargetPITCH = TargetPITCH;
-
-  
-     
+    Yaw = map(Ch4, 1100, 1800, YAW_MIN, YAW_MAX);
+ 
      
 }
 
@@ -105,14 +83,15 @@ void Ch4_Interrupt() {
 
 void Send() {
 
-  byte bufferArr[4];
+  byte bufferArr[5];
   
   bufferArr[0] = (Throttle >> 8) &0xFF;
   bufferArr[1] = Throttle & 0xFF;
   bufferArr[2] = TargetROLL & 0xFF;
   bufferArr[3] = TargetPITCH & 0xFF;
+  bufferArr[4] = Yaw & 0xFF;
   
-  Wire.write(bufferArr,4);
+  Wire.write(bufferArr,5);
   
 }
 

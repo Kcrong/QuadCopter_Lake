@@ -6,24 +6,21 @@
 
 MPU6050 mpu;
 
-//Rx channel pin
-#define RC_Ch1 4
-#define RC_Ch2 7
-#define RC_Ch3 8
-#define RC_Ch4 12
+
 
 #define ROLL_MIN -30
 #define ROLL_MAX 30
 #define PITCH_MIN -30
 #define PITCH_MAX 30
-
+#define YAW_MIN -20
+#define YAW_MAX 20
 
 
 //ESC pin
 #define ESC5 5
 #define ESC6 6
-#define ESC9 9
 #define ESC10 10
+#define ESC11 11 
 
 #define ESC_MIN 800
 #define ESC_MAX 2200 
@@ -32,10 +29,13 @@ MPU6050 mpu;
 
 
 //Gain value
-#define OuterPgain 4.0
-#define Pgain 0.3
-#define Igain 0.28
-#define Dgain 0.18
+#define OuterPgain 4.7
+#define Pgain 2.35
+#define Igain 0.43
+#define Dgain 0.344
+
+#define YAW_Pgain 2.0
+#define YAW_Igain 0.5
 
 Servo M1, M2, M3, M4;
 
@@ -52,17 +52,21 @@ float yrp[3];
 int16_t gyro[3];
 float ROLL_Angle, ROLL_Rate;
 float PITCH_Angle, PITCH_Rate;
+float YAW_Rate;
 float ROLL_AngleError, PITCH_AngleError;
 float ROLL_RateError, PITCH_RateError;
+float YAW_RateError;
 
 float ROLL_P, ROLL_D, ROLL_I = 0;
 float PITCH_P, PITCH_D, PITCH_I = 0;
+float YAW_P, YAW_I = 0;
 
 float ROLL_LastRateError ;
 float PITCH_LastRateError ;
 
 float ROLL_PID = 0;
 float PITCH_PID = 0;
+float YAW_PI;
 
  
 float M1Out, M2Out, M3Out , M4Out;
@@ -76,9 +80,10 @@ volatile bool mpuInterrupt = false;
 uint16_t Throttle,  LastThrottle=0;
 int8_t TargetROLL;
 int8_t TargetPITCH;
-int8_t LastTargetROLL, LastTargetPITCH;
+int8_t TargetYAW;
+int8_t LastTargetROLL, LastTargetPITCH,LastYAW;
 
-byte a,b,c,d;
+byte a,b,c,d,e;
 
 void dmpDataReady() {
   mpuInterrupt = true;
@@ -143,11 +148,12 @@ void loop() {
 
     ROLL_Rate = (float)gyro[1];
     PITCH_Rate = (float)gyro[0];
-
+    YAW_Rate = (float)gyro[2];
+    
     RC_Command();
 
-    if(Throttle>1900)
-      Throttle = 1900;
+    if(Throttle>1800)
+      Throttle = 1800;
 
     
     if(dmpReady > 1700){
@@ -159,23 +165,26 @@ void loop() {
     }
    
 
-    M1Out = (ROLL_PID - PITCH_PID)*0.5 + (float)Throttle;
-    M2Out = (-ROLL_PID - PITCH_PID)*0.5 + (float)Throttle;
-    M3Out = (-ROLL_PID + PITCH_PID)*0.5 + (float)Throttle;
-    M4Out = (ROLL_PID + PITCH_PID)*0.5 + (float)Throttle;
+    M1Out = (ROLL_PID - PITCH_PID)*0.5 + YAW_PI + (float)Throttle;
+    M2Out = (-ROLL_PID - PITCH_PID)*0.5 - YAW_PI + (float)Throttle;
+    M3Out = (-ROLL_PID + PITCH_PID)*0.5 + YAW_PI + (float)Throttle;
+    M4Out = (ROLL_PID + PITCH_PID)*0.5 - YAW_PI + (float)Throttle;
 
+    //Serial.print(M1Out);
+    //Serial.print("   ");
+    //Serial.println(M3Out);
    
     if(Throttle<900){
       M1Out = ESC_MIN;
       M2Out = ESC_MIN;
       M3Out = ESC_MIN;
       M4Out = ESC_MIN;
-      ROLL_I = PITCH_I = 0;
+      ROLL_I = PITCH_I = YAW_I = 0;
       
     }
 
    
-    //Serial.println(PITCH_PID);
+    
    
 
     ///////////////////////////////Motor OUTPUT//////////////////////////////////////////
@@ -210,7 +219,7 @@ void PIDcontrol(){
 
     //PITCH CONTROL//////////////////////////////////////////////////
     PITCH_AngleError = TargetPITCH - PITCH_Angle;
-    PITCH_RateError = (PITCH_AngleError * OuterPgain) -PITCH_Rate;   
+    PITCH_RateError = (PITCH_AngleError * OuterPgain) - PITCH_Rate;   
 
     PITCH_P = PITCH_RateError * Pgain;
     PITCH_I += (PITCH_RateError * SamplingTime) * Igain;
@@ -219,11 +228,16 @@ void PIDcontrol(){
     
     PITCH_LastRateError = PITCH_RateError;
     
-
     PITCH_PID = PITCH_P + PITCH_I + PITCH_D;
 
-   
 
+    //YAW CONTROLL/////////////////////////////////////////////////
+    YAW_RateError = TargetYAW - YAW_Rate;
+    YAW_P = YAW_RateError * YAW_Pgain;
+    YAW_I += (YAW_RateError * SamplingTime) * YAW_Igain ;
+    LIMIT( &YAW_I, -300, 300);
+
+    YAW_PI = YAW_P + YAW_I;
     
 }
 
@@ -232,8 +246,8 @@ void PIDcontrol(){
 void InitESC() {
   M1.attach(ESC5);
   M2.attach(ESC6);
-  M3.attach(ESC9);
-  M4.attach(ESC10);
+  M3.attach(ESC10);
+  M4.attach(ESC11);
 
   //set ESC
     M1.writeMicroseconds(ESC_MIN);
@@ -246,18 +260,20 @@ void InitESC() {
 }
 
 void RC_Command() {
-  Wire.requestFrom(4, 4);
+  Wire.requestFrom(4, 5);
 
   
   a = Wire.read();
   b = Wire.read();
   c = Wire.read();
   d = Wire.read();
+  e = Wire.read();
   
   Throttle = a;
   Throttle = (Throttle << 8) | b;
   TargetROLL = c;
   TargetPITCH = d;
+  TargetYAW = e;
 
   
     if (Throttle < ESC_MIN || Throttle > ESC_MAX)
@@ -268,17 +284,27 @@ void RC_Command() {
 
     if (TargetPITCH < PITCH_MIN || TargetPITCH > PITCH_MAX)
       TargetPITCH = LastTargetPITCH;
+
+    if (TargetYAW < YAW_MIN || TargetYAW > YAW_MAX)
+     TargetYAW = LastYAW;
       
     if (TargetROLL >= -3 && TargetROLL <= 3)
       TargetROLL = 0;
-
+    
     if (TargetPITCH >= -3 && TargetPITCH <= 3 )
       TargetPITCH = 0;
 
+    if(TargetYAW >= -3 && TargetYAW <= 3)
+      TargetYAW = 0;
+
+     
+  
     LastThrottle = Throttle;
     LastTargetROLL = TargetROLL;
     LastTargetPITCH = TargetPITCH;
+    LastYAW = TargetYAW;
 
+    
   }
   
 void LIMIT(float *Value, int MIN, int MAX){
