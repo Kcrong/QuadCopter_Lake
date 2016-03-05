@@ -29,13 +29,13 @@ MPU6050 mpu;
 
 
 //Gain value
-#define OuterPgain 4.7
-#define Pgain 2.35
-#define Igain 0.43
-#define Dgain 0.344
+#define OuterPgain 4.750
+#define Pgain 2.85
+#define Igain 0.410
+#define Dgain 0.340
 
-#define YAW_Pgain 2.0
-#define YAW_Igain 0.5
+#define YAW_Pgain 3.22
+#define YAW_Igain 0.55
 
 Servo M1, M2, M3, M4;
 
@@ -152,8 +152,8 @@ void loop() {
     
     RC_Command();
 
-    if(Throttle>1800)
-      Throttle = 1800;
+    if(Throttle>1300)
+      Throttle = 1300;
 
     
     if(dmpReady > 1700){
@@ -288,7 +288,7 @@ void RC_Command() {
     if (TargetYAW < YAW_MIN || TargetYAW > YAW_MAX)
      TargetYAW = LastYAW;
       
-    if (TargetROLL >= -3 && TargetROLL <= 3)
+    if (TargetROLL >= -3 && TargetROLL <= 3 )
       TargetROLL = 0;
     
     if (TargetPITCH >= -3 && TargetPITCH <= 3 )
@@ -296,6 +296,8 @@ void RC_Command() {
 
     if(TargetYAW >= -3 && TargetYAW <= 3)
       TargetYAW = 0;
+
+
 
      
   
